@@ -4,201 +4,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A personal, Spanish-language learning project that builds a RAG (Retrieval-Augmented Generation) pipeline in Laravel from scratch, incrementally. There is no HTTP UI — all work lives in **artisan console commands** under `app/Console/Commands/`, where each command is a stage in the learning arc. Comments and command output are in Spanish; keep that convention when editing existing commands.
+A personal, Spanish-language learning project that builds a RAG (Retrieval-Augmented Generation) pipeline in Laravel from scratch, incrementally, and then grows it into a multi-agent, multi-tenant assistant on the `laravel/ai` package. There is no HTTP UI yet — all work lives in **artisan console commands** under `app/Console/Commands/`, where each command is a stage in the learning arc. Comments and command output are mostly in Spanish; keep that convention when editing existing commands (agent instructions and tool descriptions are in English because they are prompts for the model).
 
 ## Learning arc (read the commands in this order)
 
+**Phase 1 — hand-rolled HTTP against LM Studio (legacy, kept for reference):**
+
 1. `app:lm-studio-conversation` — raw HTTP chat against a local LLM.
 2. `app:embedding-experiment` — generate embeddings and rank documents by cosine similarity computed by hand.
-3. `app:rag-completo {pregunta}` — full RAG entirely in memory: it re-indexes the hard-coded `$baseConocimiento` array on every run, retrieves top-K, then generates.
-4. `app:indexar-documentos` — persists the same knowledge base with embeddings into Postgres (run once, not per query).
-5. `app:preguntar-rag {pregunta}` — the "real" RAG: retrieval is done by pgvector in the database, generation by the chat model.
-6. `app:index-v2-command`, `app:scratch-command` — WIP migration from hand-rolled HTTP to the `laravel/ai` package.
+3. `app:rag-completo {pregunta}` — full RAG entirely in memory: re-indexes the hard-coded `$baseConocimiento` array on every run, retrieves top-K, then generates.
+4. `app:indexar-documentos` — persists that knowledge base with embeddings into Postgres.
+5. `app:preguntar-rag {pregunta}` — retrieval done by pgvector (`<=>` cosine distance, ascending), generation by the chat model.
 
-When adding a new stage, follow the existing command shape: `#[Signature]`/`#[Description]` attributes, protected `$embedUrl`/`$chatUrl`/model properties, and a private `cosineSimilarity()` / `embed()` helper if hand-rolling.
+These commands post with `Illuminate\Support\Facades\Http` to LM Studio at `http://localhost:1234/v1/...` with hard-coded models (`qwen/qwen3-8b`, `text-embedding-bge-m3`). Note they were written against a `documentos` table with a `contenido` column and now import `App\Models\Document`; they predate `project_id`/`chunk_index` being required, so expect them to need adjusting if you run them.
 
-## Two LLM backends (both local, no cloud keys)
+**Phase 2 — `laravel/ai` package against Ollama (current work):**
 
-The codebase is mid-migration between two ways of calling a local model:
+6. `app:index-v2-command`, `app:scratch-command` — first use of `Laravel\Ai\Embeddings` and `agent()`. `index-v2` also predates the `project_id` requirement.
+7. `app:index-demo` — the real indexer. Reads `storage/app/private/docs.csv` (columns `language,content`), concatenates all rows of a project's language into one source text, and dispatches an `IndexDocument` job per project.
+8. `app:ask-agent {project_slug} {question} {--as=test@example.com}` — the capstone: a multi-agent, per-project assistant with persisted conversations.
 
-- **Hand-rolled HTTP** (stages 1–5): `Illuminate\Support\Facades\Http` posts directly to **LM Studio**'s OpenAI-compatible API at `http://localhost:1234/v1/...`. Models are hard-coded per command: chat `qwen/qwen3-8b`, embeddings `text-embedding-bge-m3`.
-- **laravel/ai package** (stage 6): `use function Laravel\Ai\agent;` and `Str::of(...)->toEmbeddings()`. Configured in `config/ai.php` with `default` = `ollama` (`http://localhost:11434`), chat `qwen3:8b`, embeddings `bge-m3`.
+When adding a new stage, follow the existing command shape: `#[Signature]`/`#[Description]` attributes on the class, `handle()` returning `self::SUCCESS`/`self::FAILURE`.
 
-Both paths use the **bge-m3** embedding model, which produces **1024-dim** vectors — this must match the `vector(1024)` column. The `/no_think` token in prompts disables Qwen's reasoning output.
+## Architecture of the current system (stages 7–8)
+
+Read these together; the behavior only makes sense across them.
+
+**Multi-tenancy by `Project`.** A `Project` is one "business" with a `slug` and a `language` (`App\Enums\LanguagesEnum`, backed by the display name e.g. `'Español'`, with `shortName()` giving `es`). Everything is scoped by `project_id`: documents, orders, and agent conversations. The seeders create one project per language (`demo-en`, `demo-es`, `demo-fr`) plus a test user `test@example.com` and two orders that share order number `12345` across two projects — this is deliberately there to prove isolation.
+
+**Indexing pipeline.** `IndexDemo` → `App\Jobs\IndexDocument` (queued, `QUEUE_CONNECTION=database`, so a worker must be running) → `App\Services\ChunkingService` (paragraph-aware, 200-word chunks with 40-word overlap; constructor validates the ratio) → `Laravel\Ai\Embeddings::for($chunks)->generate()` → one `Document` row per chunk with sequential `chunk_index` and `source`. `IndexDemo` truncates `documents` first.
+
+**Agent hierarchy (`app/Ai/`).** `BusinessAgent` is an orchestrator with no tools of its own; `AskAgent` injects two sub-agents via `setTools()`. Sub-agents implement `CanActAsTool` so the orchestrator calls them by `name()` (`product_specialist`, `order_specialist`):
+- `ProductSpecialist` wraps `Laravel\Ai\Tools\SimilaritySearch::usingModel(Document::class, 'embedding', minSimilarity: 0.4, query: project filter)` — this replaces the hand-rolled pgvector query from stage 5.
+- `OrderSpecialist` wraps `App\Ai\Tools\QueryOrder`, which filters by `project_id` **and** `user_id`, so a user can only see their own orders in that project.
+- Instructions in every agent are deliberately strict about "never invent"; the orchestrator is told to relay specialist output verbatim. Keep that grounding discipline when editing prompts.
+
+**Qwen "thinking" control.** Each agent's `providerOptions()` returns `['think' => bool]` only when the provider is `ollama`. The orchestrator and `OrderSpecialist` run with `think: false` (routing only, fast); `ProductSpecialist` runs with `think: true` (needs reasoning over search results). In the legacy LM Studio commands the equivalent is the `/no_think` token in the prompt.
+
+**Conversation memory.** `BusinessAgent` uses `RemembersConversations` (max 40 messages). `App\Services\ConversationManager` finds the user's most recent conversation **in that project** updated within the last 12 hours and resumes it via `$agent->continue($id, as: $user)`, otherwise starts fresh with `forUser($user)`. The `agent_conversations` table (from the `laravel/ai` migration) has a custom added `project_id` column; `tagProject()` stamps it after every turn because the SDK does not know about projects.
+
+**Observability.** `App\Ai\Middleware\LogAgentActivity` (per-agent latency, token usage incl. reasoning tokens) and `App\Listeners\LogAgentToolCalls` (every `ToolInvoked`) write to the log, correlated by a `correlation_id` set in `Context` at the start of `AskAgent`. The listener is auto-discovered from `app/Listeners`; do **not** also register it in `AppServiceProvider` or each tool call is logged twice. Read logs with `php artisan pail`.
+
+## LLM backends (both local, no cloud keys)
+
+- **Ollama** at `http://localhost:11434` is the active backend. `config/ai.php` sets `default` and `default_for_embeddings` to `ollama`, chat model `qwen3:8b`, embeddings `bge-m3` with `dimensions => 1024`.
+- **LM Studio** at port 1234 is only needed for the legacy phase-1 commands.
+
+Both use **bge-m3 → 1024-dim vectors**, which must match the `vector(1024)` column. If you change the embedding model, change the dimension in the `documents` migration and in `config/ai.php` together.
 
 ## Data layer: Postgres + pgvector
 
-- The app **requires Postgres with the pgvector extension** despite `.env.example` still defaulting to sqlite. The real `.env` uses `pgsql` / database `rag_laravel`. The `documentos` migration will fail on sqlite because it runs raw `DB::statement` for the `vector(1024)` column and the `hnsw (embedding vector_cosine_ops)` index.
-- `App\Models\Documento` stores the embedding via `App\Casts\VectorCast`, which converts between a PHP `array<float>` and pgvector's `[0.1,0.2,...]` text format. Always assign/read `embedding` as a plain array; the cast handles serialization.
-- Similarity search uses the pgvector `<=>` operator (cosine **distance** — smaller is closer, so `orderBy('distancia')` ascending). See `PreguntarRag::recuperarContexto()`.
-- If you change the embedding model, update the `vector(N)` dimension in the migration to match.
+- The app **requires Postgres with the pgvector extension** even though `.env.example` defaults to sqlite. The real `.env` uses `pgsql` / database `rag_laravel`. The `documents` migration runs raw `DB::statement`s for the `vector(1024)` column and the `hnsw (embedding vector_cosine_ops)` index, so it fails on sqlite — this also means the default test suite cannot use sqlite for anything touching `documents`.
+- `App\Models\Document` stores the embedding via `App\Casts\VectorCast` (PHP `array<float>` ⇄ pgvector `[0.1,0.2,...]` text). Always assign/read `embedding` as a plain array.
+- Order numbers are unique per `(project_id, order_number)`, not globally.
+- Model PHPDoc blocks are generated by `barryvdh/laravel-ide-helper` (`_ide_helper.php` is checked in); regenerate with `php artisan ide-helper:models -N` after schema changes rather than hand-editing them.
 
 ## Prerequisites to run anything
 
-- A local model server must be up: **LM Studio** on port 1234 (with `bge-m3` and `qwen3-8b` loaded) for stages 1–5, or **Ollama** on port 11434 for stage 6.
-- Postgres running with the `pgvector` extension enabled and the `rag_laravel` database migrated (`php artisan migrate`).
+1. Postgres with `pgvector` enabled; `php artisan migrate --seed` (seeding creates the projects, test user and sample orders that `ask-agent` depends on).
+2. Ollama running with `qwen3:8b` and `bge-m3` pulled.
+3. A queue worker (`php artisan queue:listen` or `composer run dev`) before `app:index-demo`, since indexing is a queued job.
 
 ## Common commands
 
-- Run a stage: `php artisan app:preguntar-rag "cual es el horario?"`
-- Run tests: `php artisan test --compact` (single: `--filter=testName`)
-- Full dev stack (serve + queue + logs + vite): `composer run dev`
+```bash
+php artisan app:index-demo                                   # chunk + embed docs.csv into documents (queued)
+php artisan app:ask-agent demo-es "cual es el horario?"      # ask the Spanish business
+php artisan app:ask-agent demo-es "donde esta mi pedido 12345?" --as=test@example.com
+php artisan pail                                             # tail agent/tool logs
+php artisan test --compact                                   # run tests (--filter=testName for one)
+vendor/bin/pint --dirty --format agent                       # format changed PHP files
+composer run dev                                             # serve + queue + pail + vite
+```
 
-Note: only the default Laravel example tests exist so far (`tests/Feature`, `tests/Unit`); the RAG commands are not yet covered by tests.
+Only the default Laravel example tests exist (`tests/Feature`, `tests/Unit`); nothing in `app/Ai`, `app/Services` or the commands is covered yet. `ChunkingService` and `ConversationManager` are pure enough to unit-test without a model server.
 
-<laravel-boost-guidelines>
-=== foundation rules ===
+## Frontend (work in progress)
 
-# Laravel Boost Guidelines
-
-The Laravel Boost guidelines are specifically curated by Laravel maintainers for this application. These guidelines should be followed closely to ensure the best experience when building Laravel applications.
-
-## Foundational Context
-
-This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
-
-- php - 8.4
-- laravel/ai (AI) - v0
-- laravel/framework (LARAVEL) - v13
-- laravel/prompts (PROMPTS) - v0
-- laravel/boost (BOOST) - v2
-- laravel/mcp (MCP) - v0
-- laravel/pail (PAIL) - v1
-- laravel/pint (PINT) - v1
-- pestphp/pest (PEST) - v4
-- phpunit/phpunit (PHPUNIT) - v12
-- tailwindcss (TAILWINDCSS) - v4
-
-## Skills Activation
-
-This project has domain-specific skills available in `**/skills/**`. You MUST activate the relevant skill whenever you work in that domain—don't wait until you're stuck.
-
-## Conventions
-
-- You must follow all existing code conventions used in this application. When creating or editing a file, check sibling files for the correct structure, approach, and naming.
-- Use descriptive names for variables and methods. For example, `isRegisteredForDiscounts`, not `discount()`.
-- Check for existing components to reuse before writing a new one.
-
-## Verification Scripts
-
-- Do not create verification scripts or tinker when tests cover that functionality and prove they work. Unit and feature tests are more important.
-
-## Application Structure & Architecture
-
-- Stick to existing directory structure; don't create new base folders without approval.
-- Do not change the application's dependencies without approval.
-
-## Frontend Bundling
-
-- If the user doesn't see a frontend change reflected in the UI, it could mean they need to run `npm run build`, `npm run dev`, or `composer run dev`. Ask them.
-
-## Documentation Files
-
-- You must only create documentation files if explicitly requested by the user.
-
-## Replies
-
-- Be concise in your explanations - focus on what's important rather than explaining obvious details.
-
-=== boost rules ===
-
-# Laravel Boost
-
-## Tools
-
-- Laravel Boost is an MCP server with tools designed specifically for this application. Prefer Boost tools over manual alternatives like shell commands or file reads.
-- Use `database-query` to run read-only queries against the database instead of writing raw SQL in tinker.
-- Use `database-schema` to inspect table structure before writing migrations or models.
-- Use `get-absolute-url` to resolve the correct scheme, domain, and port for project URLs. Always use this before sharing a URL with the user.
-- Use `browser-logs` to read browser logs, errors, and exceptions. Only recent logs are useful, ignore old entries.
-
-## Searching Documentation (IMPORTANT)
-
-- Always use `search-docs` before making code changes. Do not skip this step. It returns version-specific docs based on installed packages automatically.
-- Pass a `packages` array to scope results when you know which packages are relevant.
-- Use multiple broad, topic-based queries: `['rate limiting', 'routing rate limiting', 'routing']`. Expect the most relevant results first.
-- Do not add package names to queries because package info is already shared. Use `test resource table`, not `filament 4 test resource table`.
-
-### Search Syntax
-
-1. Use words for auto-stemmed AND logic: `rate limit` matches both "rate" AND "limit".
-2. Use `"quoted phrases"` for exact position matching: `"infinite scroll"` requires adjacent words in order.
-3. Combine words and phrases for mixed queries: `middleware "rate limit"`.
-4. Use multiple queries for OR logic: `queries=["authentication", "middleware"]`.
-
-## Artisan
-
-- Run Artisan commands directly via the command line (e.g., `php artisan route:list`). Use `php artisan list` to discover available commands and `php artisan [command] --help` to check parameters.
-- Inspect routes with `php artisan route:list`. Filter with: `--method=GET`, `--name=users`, `--path=api`, `--except-vendor`, `--only-vendor`.
-- Read configuration values using dot notation: `php artisan config:show app.name`, `php artisan config:show database.default`. Or read config files directly from the `config/` directory.
-
-## Tinker
-
-- Execute PHP in app context for debugging and testing code. Do not create models without user approval, prefer tests with factories instead. Prefer existing Artisan commands over custom tinker code.
-- Always use single quotes to prevent shell expansion: `php artisan tinker --execute 'Your::code();'`
-  - Double quotes for PHP strings inside: `php artisan tinker --execute 'User::where("active", true)->count();'`
-
-=== php rules ===
-
-# PHP
-
-- Always use curly braces for control structures, even for single-line bodies.
-- Use PHP 8 constructor property promotion: `public function __construct(public GitHub $github) { }`. Do not leave empty zero-parameter `__construct()` methods unless the constructor is private.
-- Use explicit return type declarations and type hints for all method parameters: `function isAccessible(User $user, ?string $path = null): bool`
-- Use TitleCase for Enum keys: `FavoritePerson`, `BestLake`, `Monthly`.
-- Prefer PHPDoc blocks over inline comments. Only add inline comments for exceptionally complex logic.
-- Use array shape type definitions in PHPDoc blocks.
-
-=== deployments rules ===
-
-# Deployment
-
-- Laravel can be deployed using [Laravel Cloud](https://cloud.laravel.com/), which is the fastest way to deploy and scale production Laravel applications.
-
-=== laravel/core rules ===
-
-# Do Things the Laravel Way
-
-- Use `php artisan make:` commands to create new files (i.e. migrations, controllers, models, etc.). You can list available Artisan commands using `php artisan list` and check their parameters with `php artisan [command] --help`.
-- If you're creating a generic PHP class, use `php artisan make:class`.
-- Pass `--no-interaction` to all Artisan commands to ensure they work without user input. You should also pass the correct `--options` to ensure correct behavior.
-
-### Model Creation
-
-- When creating new models, create useful factories and seeders for them too. Ask the user if they need any other things, using `php artisan make:model --help` to check the available options.
-
-## APIs & Eloquent Resources
-
-- For APIs, default to using Eloquent API Resources and API versioning unless existing API routes do not, then you should follow existing application convention.
-
-## URL Generation
-
-- When generating links to other pages, prefer named routes and the `route()` function.
-
-## Testing
-
-- When creating models for tests, use the factories for the models. Check if the factory has custom states that can be used before manually setting up the model.
-- Faker: Use methods such as `$this->faker->word()` or `fake()->randomDigit()`. Follow existing conventions whether to use `$this->faker` or `fake()`.
-- When creating tests, make use of `php artisan make:test [options] {name}` to create a feature test, and pass `--unit` to create a unit test. Most tests should be feature tests.
-
-## Vite Error
-
-- If you receive an "Illuminate\Foundation\ViteException: Unable to locate file in Vite manifest" error, you can run `npm run build` or ask the user to run `npm run dev` or `composer run dev`.
-
-=== pint/core rules ===
-
-# Laravel Pint Code Formatter
-
-- If you have modified any PHP files, you must run `vendor/bin/pint --dirty --format agent` before finalizing changes to ensure your code matches the project's expected style.
-- Do not run `vendor/bin/pint --test --format agent`, simply run `vendor/bin/pint --format agent` to fix any formatting issues.
-
-=== pest/core rules ===
-
-## Pest
-
-- This project uses Pest for testing. Create tests: `php artisan make:test --pest {name}`.
-- The `{name}` argument should not include the test suite directory. Use `php artisan make:test --pest SomeFeatureTest` instead of `php artisan make:test --pest Feature/SomeFeatureTest`.
-- Run tests: `php artisan test --compact` or filter: `php artisan test --compact --filter=testName`.
-- Do NOT delete tests without approval.
-
-</laravel-boost-guidelines>
+`vite.config.js` has been switched from the Laravel plugin to a plain React/SWC setup building `resources/react/src` into `public/build`, with `@` aliased to `resources/react/src`. `App.tsx` is still empty and `routes/web.php` only serves the stock `welcome` view, so there is no working UI yet; the commented-out Laravel/Tailwind Vite config is kept at the top of the file for reference.

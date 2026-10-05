@@ -5,10 +5,11 @@ namespace App\Services;
 use App\Models\Project;
 use App\Models\User;
 use Laravel\Ai\Models\Conversation;
+use Laravel\Ai\Models\ConversationMessage;
 
 class ConversationManager
 {
-    private const INACTIVITY_HOURS = 12;
+    private const int INACTIVITY_HOURS = 12;
 
     /** The user's most recent conversation in THIS project, if still active — else null (start fresh). */
     public function activeConversationId(User $user, Project $project): ?string
@@ -25,5 +26,15 @@ class ConversationManager
     public function tagProject(string $conversationId, Project $project): void
     {
         Conversation::whereKey($conversationId)->update(['project_id' => $project->id]);
+    }
+
+    public function redactLastReply(string $conversationId, string $replacement): void
+    {
+        ConversationMessage::query()
+            ->where('conversation_id', $conversationId)
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->first()
+            ?->update(['content' => $replacement]);
     }
 }
