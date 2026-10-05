@@ -33,7 +33,7 @@ class IntentClassifier implements Agent, HasMiddleware, HasProviderOptions, HasS
 
     public function middleware(): array
     {
-        return [new LogAgentActivity];
+        return [new LogAgentActivity(class_basename($this))];
     }
 
     public function providerOptions(Lab|string $provider): array

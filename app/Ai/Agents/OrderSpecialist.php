@@ -76,6 +76,6 @@ class OrderSpecialist implements Agent, CanActAsTool, Conversational, HasMiddlew
 
     public function middleware(): array
     {
-        return [new LogAgentActivity];
+        return [new LogAgentActivity(class_basename($this))];
     }
 }

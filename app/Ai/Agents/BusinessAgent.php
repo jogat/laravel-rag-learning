@@ -105,6 +105,6 @@ class BusinessAgent implements Agent, Conversational, HasMiddleware, HasProvider
 
     public function middleware(): array
     {
-        return [new LogAgentActivity];
+        return [new LogAgentActivity(class_basename($this))];
     }
 }

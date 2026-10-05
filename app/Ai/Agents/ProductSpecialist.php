@@ -81,6 +81,6 @@ class ProductSpecialist implements Agent, CanActAsTool, Conversational, HasMiddl
 
     public function middleware(): array
     {
-        return [new LogAgentActivity];
+        return [new LogAgentActivity(class_basename($this))];
     }
 }
