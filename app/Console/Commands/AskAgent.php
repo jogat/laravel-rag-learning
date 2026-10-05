@@ -40,6 +40,10 @@ class AskAgent extends Command
         $result = $assistant->ask($this->project, $this->user, $this->argument('question'));
         $this->info($result['reply']);
 
+        if (isset($result['debug'])) {
+            $this->line(json_encode($result['debug'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
+
         //        Context::add('correlation_id', (string) Str::uuid7());
         //
         //        $agent = (new BusinessAgent(

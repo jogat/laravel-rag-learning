@@ -1,9 +1,9 @@
 import {useEffect, useState, type SubmitEvent} from "react";
-import {sendMessage} from '@/lib/api/chat.api';
+import {sendMessage, type ChatDebug} from '@/lib/api/chat.api';
 import { useAuthStore } from '@/stores/authStore';
 import { useProjectStore } from '@/stores/projectStore';
 
-type Message = {role: 'user' | 'assistant'; text: string};
+type Message = {role: 'user' | 'assistant'; text: string; debug?: ChatDebug};
 
 export default function Chat() {
     const projects = useProjectStore((s) => s.projects);
@@ -34,8 +34,8 @@ export default function Chat() {
         setError(null);
 
         try {
-            const { reply } = await sendMessage(project, text);
-            setMessages((prev) => [...prev, {role: 'assistant', text: reply}]);
+            const { reply, debug } = await sendMessage(project, text);
+            setMessages((prev) => [...prev, {role: 'assistant', text: reply, debug}]);
         } catch (error) {
             setError(error instanceof Error ? error.message : 'Unknown error');
         } finally {
@@ -78,6 +78,19 @@ export default function Chat() {
                     }`}
                     >
                         {m.text}
+                        {m.debug && (
+                            <details className="mt-2 text-xs text-gray-600">
+                                <summary className="cursor-pointer">
+                                    debug · intent: {m.debug.intent}
+                                    {m.debug.blocked_by_intent_classifier && ' (blocked)'}
+                                    {' · tools: '}
+                                    {m.debug.tool_calls.map((c) => c.tool).join(' → ') || 'none'}
+                                </summary>
+                                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap">
+                                    {JSON.stringify(m.debug, null, 2)}
+                                </pre>
+                            </details>
+                        )}
                     </div>
                 ))}
                 {loading && <div className="text-sm text-gray-500">Loading...</div>}
