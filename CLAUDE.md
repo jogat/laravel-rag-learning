@@ -79,9 +79,21 @@ composer run dev                                             # serve + queue + p
 
 Only the default Laravel example tests exist (`tests/Feature`, `tests/Unit`); nothing in `app/Ai`, `app/Services` or the commands is covered yet. `ChunkingService` and `ConversationManager` are pure enough to unit-test without a model server.
 
-## Frontend (work in progress)
+## Frontend: React chat with session auth
 
-`vite.config.js` has been switched from the Laravel plugin to a plain React/SWC setup building `resources/react/src` into `public/build`, with `@` aliased to `resources/react/src`. `App.tsx` is still empty and `routes/web.php` only serves the stock `welcome` view, so there is no working UI yet; the commented-out Laravel/Tailwind Vite config is kept at the top of the file for reference.
+A React 19 + TypeScript single-page chat served by Laravel (same origin, so no CORS), styled with Tailwind v4. Open it at `http://localhost:8000`, not Vite's `:5173`.
+
+**Serving.** `Route::view('/', 'app')` renders `resources/views/app.blade.php`, which mounts `<div id="root">` and loads `resources/react/src/main.tsx` via `@viteReactRefresh` + `@vite`. `vite.config.js` uses `laravel-vite-plugin` + `@vitejs/plugin-react-swc` + `@tailwindcss/vite`, with `@` aliased to `resources/react/src`. The plugin's single `input` is `main.tsx`, which imports `resources/css/app.css` itself, so `npm run build` and `npm run dev` both serve the app.
+
+**Screens (no router).** `App.tsx` calls `fetchUser()` on mount, shows a loader until the session check finishes, then renders `components/Login.tsx` or `components/Chat.tsx` depending on whether a user is logged in. `Chat` keeps its messages in local state (cleared when the project changes), reads projects from the store, and posts to `/api/chat`.
+
+**State (Zustand, the Vuex/Pinia equivalent).** `stores/authStore.ts` holds `user` and `checked` with the `fetchUser`/`login`/`logout` actions; logout also resets the project store. `stores/projectStore.ts` holds `projects`, `current` (selected slug), `loading` and `error`; `fetchProjects` ignores a call while one is already loading, which absorbs StrictMode's double effect. Components read single values through selectors, e.g. `useAuthStore((s) => s.user)`.
+
+**API layer.** `lib/api.ts` exports `request<T>()`, which sends JSON with `Accept: application/json` and an `X-XSRF-TOKEN` header read from Laravel's `XSRF-TOKEN` cookie, and throws `ApiError(status, message)` on non-2xx responses. Endpoint functions live in `lib/api/{auth,project,chat}.api.ts`. Laravel 13's `PreventRequestForgery` also accepts same-origin requests via `Sec-Fetch-Site`, but the token header is what protects plain-HTTP non-localhost hosts.
+
+**Backend routes (`routes/web.php`, all JSON under `/api`).** `POST /api/login` (`throttle:5,1`) is public. Behind `auth`: `GET /api/user`, `POST /api/logout`, `GET /api/projects`, and `POST /api/chat` (`throttle:20,1`). Auth is the hand-written `AuthController` using session auth (regenerates the session on login, invalidates it and rotates the token on logout), not Fortify or Sanctum. `ChatController` validates `project` (slug) and `message`, then calls `App\Services\BusinessAssistant::ask()` with `$request->user()`; `app:ask-agent` uses the same service. Guests get a 401 JSON response because `bootstrap/app.php` renders `api/*` exceptions as JSON. The seeded login is `test@example.com` / `password`.
+
+**Not handled yet:** a session that expires mid-chat shows "Unauthenticated." instead of returning to `Login`; `Chat` doesn't display `projectStore.error`; projects aren't scoped per user (every logged-in user sees all of them); there are no frontend tests.
 
 ===
 
