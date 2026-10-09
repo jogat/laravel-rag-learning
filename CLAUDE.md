@@ -28,7 +28,7 @@ Read these together; the behavior only makes sense across them.
 - `OrderSpecialist` wraps `App\Ai\Tools\QueryOrder`, which filters by `project_id` **and** `user_id`, so a user can only see their own orders in that project.
 - Instructions in every agent are deliberately strict about "never invent"; the orchestrator is told to relay specialist output verbatim. Keep that grounding discipline when editing prompts.
 
-**Qwen "thinking" control.** Each agent's `providerOptions()` returns `['think' => bool]` only when the provider is `ollama`. The orchestrator and `OrderSpecialist` run with `think: false` (routing only, fast); `ProductSpecialist` runs with `think: true` (needs reasoning over search results). In the legacy LM Studio commands the equivalent is the `/no_think` token in the prompt.
+**Qwen "thinking" control.** Each agent's `providerOptions()` returns `['think' => bool]` only when the provider is `ollama`. The orchestrator and `OrderSpecialist` run with `think: false` (routing only, fast); `ProductSpecialist` runs with `think: true` (needs reasoning over search results).
 
 **Intent gate.** Before the orchestrator runs, `BusinessAssistant::ask()` asks `IntentClassifier` (structured output: `product|order|greeting|out_of_scope`); `out_of_scope` returns the project language's canned refusal without calling the orchestrator. Replies that leak internals (tool names, the `BusinessAgent::CANARY`) are replaced and redacted from stored history. `config/assistant.php` has `bypass_intent_classifier` and `debug` (adds a `debug` trace to the reply) for audits; never enable them in production.
 
