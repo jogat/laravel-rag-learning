@@ -18,14 +18,11 @@ class ProjectFactory extends Factory
      */
     public function definition(): array
     {
-        $cases = LanguagesEnum::cases();
-        $randomLanguage = $cases[array_rand($cases)];
-
         return [
             'name' => fake()->company(),
             'description' => fake()->text(),
-            'language' => $randomLanguage->name,
-            'slug' => fake()->slug(),
+            'language' => fake()->randomElement(LanguagesEnum::cases()),
+            'slug' => fake()->unique()->slug(),
         ];
     }
 }
