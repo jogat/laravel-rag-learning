@@ -1,6 +1,6 @@
 import {useEffect, useState, type SubmitEvent} from "react";
 import {sendMessage, type ChatDebug} from '@/lib/api/chat.api';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/hooks/useAuth';
 import { useProjectStore } from '@/stores/projectStore';
 
 type Message = {role: 'user' | 'assistant'; text: string; debug?: ChatDebug};
@@ -10,8 +10,7 @@ export default function Chat() {
     const project = useProjectStore((s) => s.current);
     const fetchProjects = useProjectStore((s) => s.fetchProjects);
     const selectProject = useProjectStore((s) => s.select);
-    const user = useAuthStore((s) => s.user);
-    const logout = useAuthStore((s) => s.logout);
+    const { user, logout } = useAuth();
 
     useEffect(() => {
         fetchProjects();

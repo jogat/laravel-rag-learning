@@ -1,8 +1,10 @@
 import { useState, type SubmitEvent } from 'react';
-import { useAuthStore } from '@/stores/authStore';
+import {Navigate} from "react-router-dom";
+import {useAuth} from "@/hooks/useAuth";
+
 
 export default function Login() {
-    const login = useAuthStore((s) => s.login);
+    const { checked, isAuthenticated, login } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [submitting, setSubmitting] = useState<boolean>(false);
@@ -20,6 +22,14 @@ export default function Login() {
         } finally {
             setSubmitting(false);
         }
+    }
+
+    if (!checked) {
+        return <div className="p-8 text-gray-500">Loading...</div>;
+    }
+
+    if (isAuthenticated) {
+        return <Navigate to="/chat" replace />;
     }
 
     return (
