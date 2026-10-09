@@ -5,17 +5,19 @@ namespace App\Services;
 use App\Models\Project;
 use App\Models\User;
 use Laravel\Ai\Models\Conversation;
+use Laravel\Ai\Models\ConversationMessage;
 
 class ConversationManager
 {
-    private const INACTIVITY_HOURS = 12;
+    private const int INACTIVITY_HOURS = 12;
 
     /** The user's most recent conversation in THIS project, if still active — else null (start fresh). */
     public function activeConversationId(User $user, Project $project): ?string
     {
         return Conversation::query()
-            ->where('user_id', $user->id)
-            ->where('project_id', $project->id)                       // ← per-project isolation
+            ->where('participant_type', $user->getMorphClass())
+            ->where('participant_id', $user->id)
+            ->where('project_id', $project->id)                      // ← per-project isolation
             ->where('updated_at', '>=', now()->subHours(self::INACTIVITY_HOURS)) // ← inactivity cutoff
             ->latest('updated_at')
             ->value('id');
@@ -25,5 +27,41 @@ class ConversationManager
     public function tagProject(string $conversationId, Project $project): void
     {
         Conversation::whereKey($conversationId)->update(['project_id' => $project->id]);
+    }
+
+    /**
+     * Overwrite the latest assistant turn so a leaked reply never re-enters the model's history.
+     *
+     * Since laravel/ai 1.0 the history is rebuilt from `steps[].content`, not the `content` column, so
+     * every step's text is cleared and the last step carries the replacement. Tool calls and their
+     * results are kept.
+     */
+    public function redactLastReply(string $conversationId, string $replacement): void
+    {
+        $message = ConversationMessage::query()
+            ->where('conversation_id', $conversationId)
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->first();
+
+        if ($message === null) {
+            return;
+        }
+
+        $steps = array_map(
+            fn (array $step) => [...$step, 'content' => '', 'reasoning' => ''],
+            $message->steps ?: [[]],
+        );
+
+        $last = array_key_last($steps);
+        $steps[$last] = [
+            'tool_calls' => [],
+            'replay_blocks' => [],
+            'provider_tool_calls' => [],
+            ...$steps[$last],
+            'content' => $replacement,
+        ];
+
+        $message->update(['content' => $replacement, 'steps' => $steps]);
     }
 }

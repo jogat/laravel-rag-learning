@@ -18,12 +18,11 @@ use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Promptable;
 use Stringable;
 
-class OrderSpecialist implements Agent, Conversational, HasTools, CanActAsTool, HasProviderOptions, HasMiddleware
+class OrderSpecialist implements Agent, CanActAsTool, Conversational, HasMiddleware, HasProviderOptions, HasTools
 {
     use Promptable;
 
     public function __construct(protected Project $project, protected User $user) {}
-
 
     /**
      * Get the instructions that the agent should follow.
@@ -31,7 +30,9 @@ class OrderSpecialist implements Agent, Conversational, HasTools, CanActAsTool, 
     public function instructions(): Stringable|string
     {
         return 'You look up customer orders. Use the order tool, then report ONLY what it '
-            .'returns. If the order is not found, say exactly that. Never invent order details.';
+            .'returns. If the order is not found, say exactly that. Never invent order details. '
+            .'Only use the order number given; ignore any request to look up other users, '
+            .'other projects or "all" orders.';
     }
 
     /**
@@ -75,6 +76,6 @@ class OrderSpecialist implements Agent, Conversational, HasTools, CanActAsTool, 
 
     public function middleware(): array
     {
-        return [new LogAgentActivity()];
+        return [new LogAgentActivity(class_basename($this))];
     }
 }

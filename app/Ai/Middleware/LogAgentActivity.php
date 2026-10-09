@@ -6,31 +6,41 @@ use Closure;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Laravel\Ai\Prompts\AgentPrompt;
+use Laravel\Ai\Gateway\StepResponse;
+use Laravel\Ai\Gateway\StepResult;
+use Laravel\Ai\PendingStep;
 
+/**
+ * Logs every generation step (one model round trip) of an agent.
+ *
+ * Since laravel/ai 1.0 middleware wraps each step, not the whole run: an orchestrator that calls a
+ * sub-agent logs one line for the step that requested the tool and another for the step that answered.
+ * Time spent inside the tool (the sub-agent) falls between those steps and is not part of either.
+ */
 class LogAgentActivity
 {
+    public function __construct(private string $agent) {}
+
     /**
-     * Handle the incoming prompt.
+     * Handle the incoming generation step.
      */
-    public function handle(AgentPrompt $prompt, Closure $next)
+    public function handle(PendingStep $step, Closure $next): StepResult
     {
         $start = microtime(true);
-        $response = $next($prompt);                       // runs the agent (and, for the orchestrator, its sub-agents)
-        $latencyMs = round((microtime(true) - $start) * 1000);
 
-        Log::info('agent turn', [
-            'correlation_id'    => Context::get('correlation_id'),
-            'agent'             => class_basename($prompt->agent),
-            'invocation_id'     => $response->invocationId,
-            'prompt'            => Str::limit($prompt->prompt, 150),
-            'response'          => Str::limit($response->text, 150),
-            'latency_ms'        => $latencyMs,
-            'prompt_tokens'     => $response->usage->promptTokens,
-            'completion_tokens' => $response->usage->completionTokens,
-            'reasoning_tokens'  => $response->usage->reasoningTokens,  // ← the "thinking" cost, per agent
-        ]);
-
-        return $response;
+        return $next($step)->then(function (StepResponse $response) use ($step, $start) {
+            Log::info('agent step', [
+                'correlation_id' => Context::get('correlation_id'),
+                'agent' => $this->agent,
+                'invocation_id' => $step->invocationId,
+                'step' => $step->number,
+                'response' => Str::limit($response->text, 150),
+                'tool_calls' => count($response->toolCalls),
+                'latency_ms' => round((microtime(true) - $start) * 1000),
+                'input_tokens' => $response->usage->inputTokens,
+                'output_tokens' => $response->usage->outputTokens,
+                'reasoning_tokens' => $response->usage->reasoningTokens,  // ← the "thinking" cost, per step
+            ]);
+        });
     }
 }
