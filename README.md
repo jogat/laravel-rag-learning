@@ -10,37 +10,91 @@ leaks across projects or users.
 
 ## Prerequisites
 
-- PHP 8.3+ and Composer, Node 22+
-- Postgres with the **pgvector ≥ 0.5** extension (`brew install postgresql pgvector`, or any managed
-  Postgres that offers pgvector)
-- [Ollama](https://ollama.com) running locally
+| Tool | Version | Used for |
+|---|---|---|
+| PHP + Composer | 8.3+ | Laravel backend |
+| Node + npm | 22+ | React frontend (Vite, TypeScript, Tailwind) |
+| Postgres + **pgvector** | pgvector ≥ 0.5 | data and vector search (`brew install postgresql pgvector`, or a managed Postgres that offers pgvector) |
+| [Ollama](https://ollama.com) | recent | local chat and embeddings models |
 
 ```bash
 ollama pull qwen3:8b     # chat model
 ollama pull bge-m3       # embeddings model (1024 dimensions)
 ```
 
-## Quick start
+## Setup
+
+The fastest path is `composer setup`, which runs the backend and frontend steps below in order. Create
+the databases first (Postgres must be running):
 
 ```bash
 createdb rag_laravel
 createdb rag_laravel_testing        # used by the test suite
-
-composer setup                      # install, .env, key, npm build, migrate --seed
-# edit DB_USERNAME / DB_PASSWORD in .env if your Postgres needs them, then re-run migrate --seed
-
-composer run dev                    # app server + log tail + vite
 ```
 
-Open <http://localhost:8000> (not Vite's `:5173`) and sign in with `test@example.com` / `password`.
+### One command
 
-`migrate --seed` creates three demo projects (`demo-en`, `demo-es`, `demo-fr`), a test user, two sample
-orders and indexes the knowledge base. If Ollama wasn't ready, the seed still succeeds and tells you to
-run the indexer once it is:
+```bash
+composer setup    # composer install, .env, key, npm install, npm run build, migrate --seed
+```
+
+If `migrate` fails on credentials, set `DB_USERNAME` / `DB_PASSWORD` in `.env` (Homebrew and Postgres.app
+use your OS user and no password) and run `php artisan migrate --seed`.
+
+### Backend, step by step
+
+```bash
+composer install
+cp .env.example .env                # then check DB_USERNAME / DB_PASSWORD and OLLAMA_URL
+php artisan key:generate
+php artisan migrate --seed          # schema + demo data + knowledge-base indexing
+```
+
+`migrate --seed` enables pgvector, creates three demo projects (`demo-en`, `demo-es`, `demo-fr`), a test
+user and two sample orders, and indexes the knowledge base. If Ollama wasn't ready, the seed still
+succeeds and tells you to run the indexer once it is:
 
 ```bash
 php artisan app:index-documents
 ```
+
+### Frontend, step by step
+
+The React app lives in `resources/react/src` and is built by Vite through `laravel-vite-plugin`. It is
+served by Laravel on the same origin, so there is no separate frontend server or CORS setup.
+
+```bash
+npm install                         # dependencies
+npm run build                       # one-off production build into public/build
+# or, while developing the UI:
+npm run dev                         # Vite with hot reload (creates public/hot)
+```
+
+Always open the app through Laravel at <http://localhost:8000>, never Vite's `:5173`. If the page fails
+with "Unable to locate file in Vite manifest", run `npm run build` or start `npm run dev`.
+
+### Run it
+
+```bash
+composer run dev                    # php artisan serve + log tail (pail) + vite dev server
+```
+
+or, in separate terminals: `php artisan serve`, then `npm run dev` (skip it if you ran `npm run build`
+and aren't editing the UI).
+
+Open <http://localhost:8000> and sign in with `test@example.com` / `password`, pick a project and ask
+something such as "¿cuál es el horario?" (`demo-es`) or "¿dónde está mi pedido 12345?" (`demo-es`,
+orders are only visible to their owner).
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `No se pudo habilitar pgvector` during `migrate` | Install pgvector, then run `CREATE EXTENSION vector;` as a superuser in the target database |
+| Chat answers without knowledge, or the seed warned about Ollama | Start Ollama, `ollama pull bge-m3`, then `php artisan app:index-documents` |
+| `Unable to locate file in Vite manifest` | `npm run build` or `npm run dev` |
+| Blank page or stale UI after pulling | `npm install && npm run build` |
+| Login works but chat returns 401 | The session expired; reload and sign in again |
 
 To start over: `php artisan migrate:fresh --seed`.
 
