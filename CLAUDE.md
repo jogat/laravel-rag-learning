@@ -62,6 +62,7 @@ php artisan app:ask-agent demo-es "cual es el horario?"      # ask the Spanish b
 php artisan app:ask-agent demo-es "donde esta mi pedido 12345?" --as=test@example.com
 php artisan pail                                             # tail agent/tool logs
 php artisan test --compact                                   # feature + unit (Pest, AI calls faked); --filter=testName for one
+XDEBUG_MODE=coverage php artisan test --coverage --min=77    # same check as CI (.github/workflows/tests.yml)
 php artisan dusk                                             # browser tests; see README for the server and .env.dusk.local setup
 vendor/bin/pint --dirty --format agent                       # format changed PHP files
 composer run dev                                             # serve + pail + vite

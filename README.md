@@ -122,6 +122,10 @@ php artisan pail                    # tail agent and tool-call logs
 php artisan test --compact          # feature + unit; uses rag_laravel_testing, AI calls are faked
 ```
 
+CI (`.github/workflows/tests.yml`) runs the same suite on every PR and on pushes to `master` against a
+`pgvector/pgvector` Postgres service, with PCOV coverage over `app/` and a minimum of 77%. To check it locally:
+`XDEBUG_MODE=coverage php artisan test --coverage --min=77`. Dusk tests are not part of CI.
+
 Browser tests (Dusk) drive a real server and truncate their database, so give them their own env file:
 
 ```bash

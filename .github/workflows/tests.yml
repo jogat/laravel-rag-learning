@@ -1,0 +1,90 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rag_laravel_testing
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # phpunit.xml fija DB_DATABASE; aqui solo host y credenciales. La APP_KEY es desechable.
+    env:
+      APP_KEY: base64:Y2ktb25seS10aHJvd2F3YXkta2V5LTMyLWJ5dGVzISE=
+      DB_HOST: 127.0.0.1
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: pcov
+          extensions: pdo_pgsql, mbstring
+
+      - name: Comprobar el driver de cobertura
+        run: php -m | grep -i pcov
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # ExampleTest pide `/`, que renderiza @vite y necesita public/build.
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+
+      # Solo se mide app/ (ver <source> en phpunit.xml).
+      - name: Tests con cobertura
+        run: php artisan test --coverage --min=77 --coverage-clover=coverage.xml
+
+      - name: Resumen de cobertura
+        if: always()
+        run: |
+          [ -f coverage.xml ] || exit 0
+          php -r '
+            $m = simplexml_load_file("coverage.xml")->project->metrics;
+            $pct = round((int) $m["coveredstatements"] / max(1, (int) $m["statements"]) * 100, 1);
+            file_put_contents(getenv("GITHUB_STEP_SUMMARY"), "### Cobertura (app/): {$pct}%\n", FILE_APPEND);
+          '
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-clover
+          path: coverage.xml
+          if-no-files-found: ignore
