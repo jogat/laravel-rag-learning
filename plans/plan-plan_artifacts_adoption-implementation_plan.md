@@ -1,51 +1,51 @@
-# Adopción de plan artifacts en el repo RAG
+# Plan artifacts adoption in the RAG repo
 
 ## Summary
 
-Adoptar la metodología de *plan artifacts* de taskrunner: una guideline (`.ai/guidelines/plan-artifacts.md`) que Boost
-compone en `CLAUDE.md`/`AGENTS.md`, más un directorio `plans/` versionado donde los agentes dejan el plan antes de
-implementar trabajo no trivial. Se porta solo la metodología, no las herramientas de GovTribe.
+Adopt the *plan artifacts* methodology: a guideline (`.ai/guidelines/plan-artifacts.md`) that Boost composes into
+`CLAUDE.md`/`AGENTS.md`, plus a versioned `plans/` directory where agents leave the plan before implementing
+non-trivial work. Only the methodology is adopted, not any external team's tooling.
 
 ## Context
 
-- Taskrunner: guideline de ~45 líneas, `plans/` con 296 planes commiteados, scaffold `worktree_ops.py plan`, reglas de
-  board y story points. Solo la guideline es la metodología; el resto depende de GovTribe/`gh`/Sail.
-- Este repo: sin `.ai/guidelines` ni `plans/`; `boost.json` con `guidelines: true`; `composer.json:65` ejecuta
-  `boost:update` tras cada `composer update`, por lo que el bloque de Boost nunca se edita a mano.
-- Boost incluye "solo crear archivos de documentación si se piden" y "no crear carpetas base nuevas sin aprobación";
-  la guideline los exceptúa solo para `plans/plan-*.md`.
-- El plugin superpowers guarda planes en `docs/superpowers/plans/`; la guideline declara que `plans/` tiene precedencia.
-- Revisado de forma adversarial en 3 iteraciones (Opus, Fable, Opus); hallazgos F1–F7 resueltos (F7 incorporado tras el gate).
+- The methodology is a single ~45-line guideline with committed plans in `plans/`. Scaffold scripts and board/story-point
+  rules from the source project are tied to its own infrastructure (`gh`, Sail, a project board) and are not needed here.
+- This repo had no `.ai/guidelines` or `plans/`; `boost.json` has `guidelines: true`; `composer.json:65` runs
+  `boost:update` after every `composer update`, so the Boost block is never edited by hand.
+- Boost includes "only create documentation files if explicitly requested" and "don't create new base folders without
+  approval"; the guideline exempts `plans/plan-*.md` from both.
+- The superpowers plugin saves plans to `docs/superpowers/plans/`; the guideline states that `plans/` takes precedence.
+- Reviewed adversarially in 3 iterations (Opus, Fable, Opus); findings F1–F7 resolved (F7 incorporated after the gate).
 
 ## Implementation
 
-0. Rama `feature/plan-artifacts-adoption` desde master limpio; todos los commits en la rama.
-1. Crear `.ai/guidelines/plan-artifacts.md`: nombre `plans/plan-{topic_slug}-{plan_name}.md` (slug = rama sin `feature/`,
-   guiones a guiones bajos, sin números de PR), búsqueda sin rama (`ls -t plans/ | head`, `grep -i`), excepción a las
-   dos reglas de Boost, precedencia sobre skills de planificación, plantilla de cinco secciones.
-2. Crear este archivo como primer plan.
-3. `php artisan boost:update --no-interaction` como único escritor del bloque. Esperado: nuevo bloque
-   `=== .ai/plan-artifacts rules ===` en ambos archivos. Si no recoge `.ai/guidelines/` o toca la sección escrita a
-   mano, detenerse y reportar. El drift ajeno va en un commit aparte o se restaura completo.
-4. Una línea de referencia a `plans/` en la sección escrita a mano de `CLAUDE.md`.
-5. Commit en la rama; PR solo con aprobación.
+0. Branch `feature/plan-artifacts-adoption` from a clean master; all commits on the branch.
+1. Create `.ai/guidelines/plan-artifacts.md`: file name `plans/plan-{topic_slug}-{plan_name}.md` (slug = branch without
+   `feature/`, hyphens to underscores, no PR numbers), lookup without a branch (`ls -t plans/ | head`, `grep -i`),
+   exemption from the two Boost rules, precedence over planning skills, five-section template.
+2. Create this file as the first plan.
+3. Run `php artisan boost:update --no-interaction` as the only writer of the Boost block. Expected: a new
+   `=== .ai/plan-artifacts rules ===` block in both files. If it does not pick up `.ai/guidelines/` or touches the
+   hand-written section, stop and report. Unrelated drift goes in a separate commit or is restored wholesale.
+4. Add one line pointing to `plans/` in the hand-written section of `CLAUDE.md`.
+5. Commit on the branch; open a PR only with approval.
 
 ## Rejected alternatives
 
-- Portar `worktree_ops.py plan`: acoplado a GovTribe, `gh` y Sail.
-- Reglas de board/story points: aquí no hay board.
-- Números de PR/issue en el nombre: no existen antes del plan, no sirven como clave de búsqueda estable.
-- Pegar el bloque a mano en `CLAUDE.md`/`AGENTS.md` si Boost falla: `composer update` lo borraría.
-- Guardar planes en `docs/`: choca con superpowers y con la regla de no crear documentación sin pedirla.
+- Porting a plan-scaffold script: coupled to infrastructure this repo does not have.
+- Board/story-point rules: there is no board here.
+- PR/issue numbers in file names: they do not exist before the plan, so they are not a stable lookup key.
+- Pasting the block by hand into `CLAUDE.md`/`AGENTS.md` if Boost fails: `composer update` would erase it.
+- Storing plans in `docs/`: conflicts with superpowers and with the rule against creating documentation unasked.
 
 ## Verification
 
-- `git status` lista solo la guideline, este plan, `CLAUDE.md` y `AGENTS.md`; cambios en `.agents/skills`,
-  `.claude/skills`, `.ai/mcp` o `boost.json` se marcan y se tratan según el paso 3.
-- `grep -c 'plan-artifacts rules' CLAUDE.md AGENTS.md` → 1 en cada uno; este plan contiene las cinco secciones.
-- Idempotencia: un segundo `boost:update` deja `git diff --exit-code` limpio.
-- `php artisan test --compact` en verde; Pint sin cambios.
-- Comportamiento en worktree desechable desde el HEAD de la rama, después del commit: Claude Code con y sin
-  superpowers, y Codex. (a) tarea no trivial → plan en `plans/`; (b) edición trivial → cita el motivo de omisión, sin
-  plan; (c) pregunta de solo lectura → sin plan. Cualquier fallo, en especial un plan en `docs/superpowers/`, bloquea el
-  PR hasta revisar la redacción y repetir, o hasta que el usuario acepte la limitación por escrito.
+- `git status` lists only the guideline, this plan, `CLAUDE.md` and `AGENTS.md`; changes under `.agents/skills`,
+  `.claude/skills`, `.ai/mcp` or `boost.json` are flagged and handled per step 3.
+- `grep -c 'plan-artifacts rules' CLAUDE.md AGENTS.md` returns 1 for each; this plan has the five sections.
+- Idempotence: a second `boost:update` leaves `git diff --exit-code` clean.
+- `php artisan test --compact` is green; Pint makes no changes.
+- Behavior in a disposable worktree from the branch HEAD, after the commit: Claude Code with and without superpowers,
+  and Codex. (a) non-trivial task → plan in `plans/`; (b) trivial edit → skip reason cited, no plan; (c) read-only
+  question → no plan. Any failure, especially a plan in `docs/superpowers/`, blocks the PR until the wording is revised
+  and the runs repeated, or the user accepts the limitation in writing.

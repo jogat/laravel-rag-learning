@@ -55,7 +55,7 @@ ls plans/ | grep -i <keyword>
 
 ## Plan Template
 
-Narrative in Spanish, identifiers in English. Use these headings:
+Write plans in English. Use these headings:
 
 1. `## Summary` — goal and why this approach fits.
 2. `## Context` — constraints, existing plans read, relevant prior decisions.
