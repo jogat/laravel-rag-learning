@@ -15,11 +15,11 @@ return [
 
     'default' => 'ollama',
     'default_for_embeddings' => 'ollama',
-//    'default' => 'openai',
+    //    'default' => 'openai',
     'default_for_images' => 'gemini',
     'default_for_audio' => 'openai',
     'default_for_transcription' => 'openai',
-//    'default_for_embeddings' => 'openai',
+    //    'default_for_embeddings' => 'openai',
     'default_for_reranking' => 'cohere',
 
     /*
@@ -116,24 +116,24 @@ return [
         ],
 
         'ollama' => [
-//            'driver' => 'ollama',
-//            'key' => env('OLLAMA_API_KEY', ''),
-//            'url' => env('OLLAMA_URL', 'http://localhost:11434'),
-//            'models' => [
-//                'text' => [
-//                    'default' => 'qwen3:8b',
-//                ],
-//                'embeddings' => [
-//                    'default' => 'bge-m3',
-//                ],
-//            ],
+            //            'driver' => 'ollama',
+            //            'key' => env('OLLAMA_API_KEY', ''),
+            //            'url' => env('OLLAMA_URL', 'http://localhost:11434'),
+            //            'models' => [
+            //                'text' => [
+            //                    'default' => 'qwen3:8b',
+            //                ],
+            //                'embeddings' => [
+            //                    'default' => 'bge-m3',
+            //                ],
+            //            ],
 
             'driver' => 'ollama',
             'key' => env('OLLAMA_API_KEY', ''),
             'url' => env('OLLAMA_URL', 'http://localhost:11434'),
             'models' => [
                 'text' => [
-                    'default' => 'qwen3:8b',
+                    'default' => env('OLLAMA_TEXT_MODEL', 'qwen3:4b-instruct'),
                 ],
                 'embeddings' => [
                     'default' => 'bge-m3',

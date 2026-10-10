@@ -5,6 +5,7 @@ use App\Ai\Agents\IntentClassifier;
 use App\Enums\LanguagesEnum;
 use App\Models\Project;
 use App\Models\User;
+use Laravel\Ai\Embeddings;
 use Laravel\Ai\Models\Conversation;
 
 use function Pest\Laravel\actingAs;
@@ -12,6 +13,7 @@ use function Pest\Laravel\assertDatabaseHas;
 use function Pest\Laravel\postJson;
 
 it('returns the agent reply and stores the conversation under the project', function () {
+    Embeddings::fake();
     $user = User::factory()->create();
     $project = Project::factory()->create(['slug' => 'demo-es', 'language' => LanguagesEnum::Spanish]);
     IntentClassifier::fake([['intent' => 'product']])->preventStrayPrompts();

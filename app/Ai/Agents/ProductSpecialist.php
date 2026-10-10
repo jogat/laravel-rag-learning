@@ -5,6 +5,7 @@ namespace App\Ai\Agents;
 use App\Ai\Middleware\LogAgentActivity;
 use App\Models\Document;
 use App\Models\Project;
+use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\CanActAsTool;
 use Laravel\Ai\Contracts\Conversational;
@@ -18,6 +19,7 @@ use Laravel\Ai\Promptable;
 use Laravel\Ai\Tools\SimilaritySearch;
 use Stringable;
 
+#[Timeout(300)] // qwen3:8b con think:true supera los 60s por defecto
 class ProductSpecialist implements Agent, CanActAsTool, Conversational, HasMiddleware, HasProviderOptions, HasTools
 {
     use Promptable;
@@ -82,7 +84,9 @@ class ProductSpecialist implements Agent, CanActAsTool, Conversational, HasMiddl
     {
         $driver = $provider instanceof Lab ? $provider->value : $provider;
 
-        return $driver === 'ollama' ? ['think' => true] : [];
+        // ponytail: think:false porque en CPU (sin GPU) el pase de razonamiento
+        // de qwen3:8b tarda minutos; subelo a true si corres en una maquina con GPU.
+        return $driver === 'ollama' ? ['think' => false] : [];
     }
 
     public function middleware(): array

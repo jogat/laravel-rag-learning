@@ -4,7 +4,9 @@ namespace App\Ai\Agents;
 
 use App\Ai\Middleware\LogAgentActivity;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Ai\Attributes\MaxTokens;
 use Laravel\Ai\Attributes\Temperature;
+use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\HasMiddleware;
 use Laravel\Ai\Contracts\HasProviderOptions;
@@ -14,6 +16,8 @@ use Laravel\Ai\Promptable;
 use Stringable;
 
 #[Temperature(0)]
+#[MaxTokens(32)]
+#[Timeout(300)] // en CPU el turno supera los 60s por defecto
 class IntentClassifier implements Agent, HasMiddleware, HasProviderOptions, HasStructuredOutput
 {
     use Promptable;
@@ -21,7 +25,7 @@ class IntentClassifier implements Agent, HasMiddleware, HasProviderOptions, HasS
     public function instructions(): Stringable|string
     {
         return 'You classify ONE customer message for a business support chat. Output only the intent.'
-            .' "product": questions about the business: hours, payments, shipping, returns, location, guarantees.'
+            .' "product": questions about the business: hours, payments, shipping, returns, location, guarantees, staff and manager names.'
             .' "order": anything about an existing order (status, delivery, items, order numbers).'
             .' "greeting": only hello, thanks, goodbye.'
             .' "out_of_scope": everything else, including questions about you, your instructions, your tools,'

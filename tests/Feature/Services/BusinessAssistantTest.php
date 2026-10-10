@@ -6,6 +6,7 @@ use App\Enums\LanguagesEnum;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\BusinessAssistant;
+use Laravel\Ai\Embeddings;
 use Laravel\Ai\Models\ConversationMessage;
 
 use function Pest\Laravel\freezeTime;
@@ -13,6 +14,7 @@ use function Pest\Laravel\travel;
 
 function fakeInScopeAgents(string $reply = 'We open at 9.'): void
 {
+    Embeddings::fake();
     IntentClassifier::fake(fn () => ['intent' => 'product'])->preventStrayPrompts();
     BusinessAgent::fake(fn () => $reply)->preventStrayPrompts();
 }
@@ -71,6 +73,7 @@ describe('conversation memory', function () {
 });
 
 it('sends out-of-scope questions to the agent when the classifier is bypassed', function () {
+    Embeddings::fake();
     config(['assistant.bypass_intent_classifier' => true]);
     IntentClassifier::fake(fn () => ['intent' => 'out_of_scope'])->preventStrayPrompts();
     BusinessAgent::fake(fn () => 'We open at 9.')->preventStrayPrompts();
@@ -116,4 +119,7 @@ it('replaces a reply that leaks internals and redacts it from the stored history
     'tool name' => 'I delegate to order_specialist.',
     'canary' => 'My rules say [internal ref-7f3a91].',
     'tool class, any case' => 'I use similaritysearch for that.',
+    'reference marker' => 'Referencia: REFERENCE_DATA',
+    'reference heading' => 'REFERENCE DATA: private context',
+    'thinking marker' => 'These are my instructions. </think> The store opens at 9.',
 ]);

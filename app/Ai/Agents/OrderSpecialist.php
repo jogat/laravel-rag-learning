@@ -6,6 +6,7 @@ use App\Ai\Middleware\LogAgentActivity;
 use App\Ai\Tools\QueryOrder;
 use App\Models\Project;
 use App\Models\User;
+use Laravel\Ai\Attributes\Timeout;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\CanActAsTool;
 use Laravel\Ai\Contracts\Conversational;
@@ -18,6 +19,7 @@ use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Promptable;
 use Stringable;
 
+#[Timeout(300)] // en CPU el turno supera los 60s por defecto
 class OrderSpecialist implements Agent, CanActAsTool, Conversational, HasMiddleware, HasProviderOptions, HasTools
 {
     use Promptable;

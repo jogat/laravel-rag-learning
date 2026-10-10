@@ -4,20 +4,25 @@ namespace App\Services;
 
 use App\Ai\Agents\BusinessAgent;
 use App\Ai\Agents\IntentClassifier;
-use App\Ai\Agents\OrderSpecialist;
-use App\Ai\Agents\ProductSpecialist;
+use App\Ai\Tools\QueryOrder;
+use App\Models\Document;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Laravel\Ai\Tools\Request;
 
 class BusinessAssistant
 {
     /** Hidden Context stack where LogAgentToolCalls records each tool call while CHAT_DEBUG is on. */
     public const string TOOL_TRACE = 'assistant.tool_calls';
 
-    public function __construct(private ConversationManager $conversations) {}
+    public function __construct(
+        private ConversationManager $conversations,
+        private OrderReference $orderReference,
+        private KnowledgeEvidence $knowledgeEvidence,
+    ) {}
 
     /**
      * Answer one chat message for a user in a project.
@@ -32,7 +37,15 @@ class BusinessAssistant
         Context::add('correlation_id', (string) Str::uuid7());
         Context::forgetHidden(self::TOOL_TRACE);
 
-        $intent = (new IntentClassifier)->prompt($question)['intent'] ?? 'out_of_scope';
+        $active = $this->conversations->activeConversationId($user, $project);
+        $earlierQuestions = $active === null ? [] : (new BusinessAgent(language: $project->language, think: false))
+            ->continue($active, as: $user)->previousCustomerMessages();
+        $background = implode("\n", $earlierQuestions);
+        $isFollowUp = preg_match('/^(?:¿?y\b|and\b|et\b)|\b(ese|esa|eso|that|those|cela)\b/iu', trim($question)) === 1
+            || Str::wordCount($question) <= 3;
+        $classificationQuestion = $background === '' || ! $isFollowUp ? $question
+            : $background."\nUse the background only to resolve missing context in the current message. Classify ONLY the following current message:\n".$question;
+        $intent = (new IntentClassifier)->prompt($classificationQuestion)['intent'] ?? 'out_of_scope';
         $bypassClassifier = (bool) config('assistant.bypass_intent_classifier');
 
         if ($intent === 'out_of_scope') {
@@ -49,19 +62,65 @@ class BusinessAssistant
             }
         }
 
+        if ($intent !== 'out_of_scope' && $this->orderReference->isOrderQuestion($question, $earlierQuestions)) {
+            $intent = 'order';
+        }
+
         $agent = (new BusinessAgent(
             language: $project->language,
-            think: false
-        ))->setTools([
-            new ProductSpecialist($project),
-            new OrderSpecialist($project, $user),
-        ]);
+            think: false,
+            intent: $intent,
+        ));
 
-        $active = $this->conversations->activeConversationId($user, $project);
+        $agent->continueOrStart($active, as: $user);
 
-        $response = $active
-            ? $agent->continue($active, as: $user)->prompt($question)
-            : $agent->forUser($user)->prompt($question);
+        if ($intent === 'product' || ($intent === 'out_of_scope' && $bypassClassifier)) {
+            $retrievalStartedAt = microtime(true);
+            $previousQuestion = $earlierQuestions === [] ? '' : $earlierQuestions[array_key_last($earlierQuestions)];
+            $searchQuery = $previousQuestion !== '' && $isFollowUp
+                ? $previousQuestion."\nCurrent question: ".$question
+                : $question;
+            $agent->setQuestionContext($isFollowUp ? $previousQuestion : '');
+            $excerpts = Document::query()
+                ->where('project_id', $project->id)
+                ->whereVectorSimilarTo('embedding', $searchQuery, minSimilarity: 0.4)
+                ->limit(2)
+                ->pluck('content')
+                ->all();
+            $referenceData = $this->knowledgeEvidence->forQuestion($excerpts, $question);
+            $agent->setReferenceData($referenceData);
+
+            if (config('assistant.debug')) {
+                Context::pushHidden(self::TOOL_TRACE, [
+                    'agent' => 'BusinessAssistant',
+                    'tool' => 'SimilaritySearch',
+                    'arguments' => ['query' => $searchQuery],
+                    'result' => $referenceData,
+                    'duration_ms' => round((microtime(true) - $retrievalStartedAt) * 1000),
+                ]);
+            }
+        }
+
+        if ($intent === 'order') {
+            $orderNumber = $this->orderReference->resolve($question, $earlierQuestions);
+            $orderStartedAt = microtime(true);
+            $referenceData = $orderNumber === null
+                ? 'No unambiguous order number was provided. Ask the customer for the order number.'
+                : (new QueryOrder($project, $user))->handle(new Request(['order_number' => $orderNumber]));
+            $agent->setReferenceData($referenceData);
+
+            if ($orderNumber !== null && config('assistant.debug')) {
+                Context::pushHidden(self::TOOL_TRACE, [
+                    'agent' => 'BusinessAssistant',
+                    'tool' => 'QueryOrder',
+                    'arguments' => ['order_number' => $orderNumber],
+                    'result' => $referenceData,
+                    'duration_ms' => round((microtime(true) - $orderStartedAt) * 1000),
+                ]);
+            }
+        }
+
+        $response = $agent->prompt($question);
 
         $this->conversations->tagProject($response->conversationId, $project);
 
@@ -118,6 +177,10 @@ class BusinessAssistant
             'order_specialist',
             'QueryOrder',
             'SimilaritySearch',
+            'REFERENCE_DATA',
+            'REFERENCE DATA:',
+            '<think>',
+            '</think>',
         ], ignoreCase: true);
     }
 }
